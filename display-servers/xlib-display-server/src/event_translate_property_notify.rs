@@ -42,6 +42,7 @@ pub fn from_event(
             .get_wmhints(event.window)
             .map(|hints| build_change_hints(event, hints))
             .map(DisplayEvent::WindowChange),
+        xlib::XA_WM_CLASS => Some(update_class(xw, event.window)),
         xlib::XA_WM_NAME => Some(update_title(xw, event.window)),
         _ => {
             if event.atom == xw.atoms.NetWMName {
@@ -128,6 +129,16 @@ fn build_change_for_size_hints(
     hint.update(&mut xyhw);
     change.requested = Some(xyhw);
     Some(change)
+}
+
+fn update_class(xw: &XWrap, window: xlib::Window) -> DisplayEvent<XlibWindowHandle> {
+    let handle = WindowHandle(XlibWindowHandle(window));
+    let mut change = WindowChange::new(handle);
+    if let Some((res_name, res_class)) = xw.get_window_class(window) {
+        change.res_name = Some(res_name);
+        change.res_class = Some(res_class);
+    }
+    DisplayEvent::WindowChange(change)
 }
 
 fn update_title(xw: &XWrap, window: xlib::Window) -> DisplayEvent<XlibWindowHandle> {

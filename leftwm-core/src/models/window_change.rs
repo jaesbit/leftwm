@@ -21,6 +21,8 @@ pub struct WindowChange<H: Handle> {
     pub strut: Option<XyhwChange>,
     pub requested: Option<Xyhw>,
     pub states: Option<Vec<WindowState>>,
+    pub res_name: Option<String>,
+    pub res_class: Option<String>,
 }
 
 impl<H: Handle> WindowChange<H> {
@@ -37,6 +39,8 @@ impl<H: Handle> WindowChange<H> {
             strut: None,
             requested: None,
             states: None,
+            res_name: None,
+            res_class: None,
         }
     }
 
@@ -94,6 +98,16 @@ impl<H: Handle> WindowChange<H> {
         if let Some(states) = self.states {
             changed = true;
             window.states = states;
+        }
+        if let Some(res_name) = self.res_name {
+            let updated = window.res_name.as_deref() != Some(res_name.as_str());
+            changed = changed || updated;
+            window.res_name = Some(res_name);
+        }
+        if let Some(res_class) = self.res_class {
+            let updated = window.res_class.as_deref() != Some(res_class.as_str());
+            changed = changed || updated;
+            window.res_class = Some(res_class);
         }
         changed
     }

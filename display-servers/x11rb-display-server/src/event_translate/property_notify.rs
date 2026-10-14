@@ -60,6 +60,10 @@ pub(crate) fn from_event(
             .map(|hints| build_change_hints(event, hints))
             .map(DisplayEvent::WindowChange)),
 
+        x if x == <xproto::AtomEnum as Into<u32>>::into(xproto::AtomEnum::WM_CLASS) => {
+            update_class(xw, event.window)
+        }
+
         x if x == <xproto::AtomEnum as Into<u32>>::into(xproto::AtomEnum::WM_NAME) => {
             update_title(xw, event.window)
         }
@@ -88,6 +92,19 @@ pub(crate) fn from_event(
             Ok(None)
         }
     }
+}
+
+fn update_class(
+    xw: &XWrap,
+    window: xproto::Window,
+) -> Result<Option<DisplayEvent<X11rbWindowHandle>>> {
+    let handle = WindowHandle(X11rbWindowHandle(window));
+    let mut change = WindowChange::new(handle);
+    if let Some(class) = xw.get_window_class(window)? {
+        change.res_name = String::from_utf8(class.instance().to_vec()).ok();
+        change.res_class = String::from_utf8(class.class().to_vec()).ok();
+    }
+    Ok(Some(DisplayEvent::WindowChange(change)))
 }
 
 fn build_change_hints(
