@@ -160,14 +160,25 @@ impl<H: Handle, C: Config, SERVER: DisplayServer<H>> Manager<H, C, SERVER> {
         let mut above_changed = false;
         let mut transient_changed = false;
         let strut_changed = change.strut.is_some();
-        let windows = self.state.windows.clone();
-        let respect_dialog_position = self.config.respect_dialog_position();
-        if let Some(window) = self
+        let mut class_changed = false;
+        let window_idx = self
             .state
             .windows
-            .iter_mut()
-            .find(|w| w.handle == change.handle)
-        {
+            .iter()
+            .position(|w| w.handle == change.handle);
+        let windows = self.state.windows.clone();
+        let respect_dialog_position = self.config.respect_dialog_position();
+        if let Some(window) = window_idx.and_then(|idx| self.state.windows.get_mut(idx)) {
+            // Compare before `update` consumes the change: X re-sends `WM_CLASS` notifications
+            // with identical values, and re-applying rules would re-queue state changes and focus.
+            class_changed = change
+                .res_name
+                .as_ref()
+                .is_some_and(|name| window.res_name.as_ref() != Some(name))
+                || change
+                    .res_class
+                    .as_ref()
+                    .is_some_and(|class| window.res_class.as_ref() != Some(class));
             transient_changed = change
                 .transient
                 .as_ref()
@@ -199,6 +210,15 @@ impl<H: Handle, C: Config, SERVER: DisplayServer<H>> Manager<H, C, SERVER> {
                 // Don't let changes from docks re-render the worker. This will result in an
                 // infinite loop. Just be patient a rerender will occur.
             }
+        }
+        if class_changed && let Some(idx) = window_idx {
+            // `WM_CLASS` may be set after the window was mapped (Electron, Steam, ...).
+            // Re-apply the window rules so class-based hooks are not missed.
+            let mut window = self.state.windows.remove(idx);
+            changed |= self
+                .config
+                .setup_predefined_window(&mut self.state, &mut window);
+            self.state.windows.insert(idx, window);
         }
         if fullscreen_changed {
             // Update `dock` windows once, so they can recieve mouse click events again.
@@ -924,6 +944,39 @@ mod tests {
                 .find(|window| window.handle == WindowHandle(2))
                 .is_some_and(Window::visible)
         );
+    }
+
+    fn class_change(handle: MockHandle, class: &str) -> WindowChange<MockHandle> {
+        let mut change = WindowChange::new(WindowHandle(handle));
+        change.res_name = Some(class.to_owned());
+        change.res_class = Some(class.to_owned());
+        change
+    }
+
+    #[test]
+    fn late_wm_class_applies_window_rules() {
+        let mut manager = Manager::new_test(vec!["1".to_string(), "2".to_string()]);
+        manager.screen_create_handler(Screen::default());
+        manager.window_created_handler(Window::new(WindowHandle(1), None, None), -1, -1);
+        assert_eq!(manager.state.windows[0].tag, Some(1));
+
+        assert!(manager.window_changed_handler(class_change(1, "ShouldGoToTag2")));
+        assert_eq!(manager.state.windows[0].tag, Some(2));
+    }
+
+    #[test]
+    fn identical_wm_class_does_not_reapply_window_rules() {
+        let mut manager = Manager::new_test(vec!["1".to_string(), "2".to_string()]);
+        manager.screen_create_handler(Screen::default());
+        let mut window = Window::new(WindowHandle(1), None, None);
+        window.res_name = Some("ShouldGoToTag2".to_owned());
+        window.res_class = Some("ShouldGoToTag2".to_owned());
+        manager.window_created_handler(window, -1, -1);
+        // The user moved the window back after creation, the rule must not undo that.
+        manager.state.windows[0].tag = Some(1);
+
+        assert!(!manager.window_changed_handler(class_change(1, "ShouldGoToTag2")));
+        assert_eq!(manager.state.windows[0].tag, Some(1));
     }
 
     #[test]
