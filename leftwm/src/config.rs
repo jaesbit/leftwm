@@ -1046,12 +1046,20 @@ mod tests {
         );
     }
 
-    /// Two unclassed windows on one screen, window 2 focused. Then window 1 reports
-    /// `WM_CLASS` "late", which matches the rule under test.
-    fn late_class_manager(rule: &str) -> Manager<TestHandle, Config, TestDisplayServer> {
+    /// Two unclassed windows on workspace 1 (tag 1), window 2 focused. Then window 1 reports
+    /// `WM_CLASS` "late", which matches the rule under test. `screens` workspaces exist,
+    /// workspace N shows tag N.
+    fn late_class_manager(
+        rule: &str,
+        screens: usize,
+    ) -> Manager<TestHandle, Config, TestDisplayServer> {
         let config = parse_ron_config(&format!("(window_rules: [{rule}])"));
         let mut manager: Manager<TestHandle, Config, TestDisplayServer> = Manager::new(config);
-        manager.screen_create_handler(leftwm_core::models::Screen::default());
+        for _ in 0..screens {
+            manager.screen_create_handler(leftwm_core::models::Screen::default());
+        }
+        let first = manager.state.workspaces[0].clone();
+        manager.state.focus_workspace(&first);
         for handle in [1, 2] {
             let window = Window::new(WindowHandle(TestHandle(handle)), None, None);
             manager.window_created_handler(window, -1, -1);
@@ -1070,6 +1078,7 @@ mod tests {
     fn late_class_rule_with_state_change_refocuses_the_window() {
         let manager = late_class_manager(
             "(window_class: \"^late$\", spawn_sticky: false, disable_mouse_grab: true)",
+            1,
         );
 
         let focused = manager.state.focus_manager.window(&manager.state.windows);
@@ -1078,7 +1087,7 @@ mod tests {
 
     #[test]
     fn late_class_rule_on_workspace_keeps_the_window_in_the_stacking_order() {
-        let manager = late_class_manager("(window_class: \"^late$\", spawn_on_workspace: 1)");
+        let manager = late_class_manager("(window_class: \"^late$\", spawn_on_workspace: 1)", 1);
 
         let last_order = manager
             .state
@@ -1092,5 +1101,38 @@ mod tests {
             .expect("a matched rule must reorder windows");
         assert!(last_order.contains(&WindowHandle(TestHandle(1))));
         assert!(last_order.contains(&WindowHandle(TestHandle(2))));
+    }
+
+    #[test]
+    fn late_class_rule_moving_to_another_workspace_focuses_the_destination() {
+        let manager = late_class_manager(
+            "(
+                window_class: \"^late$\",
+                spawn_on_workspace: 2,
+                spawn_sticky: false,
+                disable_mouse_grab: true,
+            )",
+            2,
+        );
+        let state = &manager.state;
+
+        let window = state
+            .windows
+            .iter()
+            .find(|w| w.handle == WindowHandle(TestHandle(1)))
+            .unwrap();
+        assert_eq!(window.tag, Some(2));
+        assert_eq!(
+            state.focus_manager.window(&state.windows).map(|w| w.handle),
+            Some(WindowHandle(TestHandle(1)))
+        );
+        assert_eq!(
+            state
+                .focus_manager
+                .workspace(&state.workspaces)
+                .map(|ws| ws.id),
+            Some(2)
+        );
+        assert_eq!(state.focus_manager.tag(0), Some(2));
     }
 }

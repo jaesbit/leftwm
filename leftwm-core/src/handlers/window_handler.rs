@@ -218,16 +218,23 @@ impl<H: Handle, C: Config, SERVER: DisplayServer<H>> Manager<H, C, SERVER> {
             // copy so the window stays in `state.windows`: hooks that focus or reorder windows
             // must still find it. `apply` may reorder the vec, so write back by handle.
             let mut window = self.state.windows[idx].clone();
+            let handle = window.handle;
             rules_applied = self
                 .config
                 .setup_predefined_window(&mut self.state, &mut window);
-            if let Some(slot) = self
-                .state
-                .windows
-                .iter_mut()
-                .find(|w| w.handle == window.handle)
-            {
+            if let Some(slot) = self.state.windows.iter_mut().find(|w| w.handle == handle) {
                 *slot = window;
+            }
+            // Focus changes made by the rules resolved the workspace/tag from the stored
+            // window, i.e. its old tag. Re-focus so they follow the tag the rules assigned.
+            if rules_applied
+                && self
+                    .state
+                    .focus_manager
+                    .window(&self.state.windows)
+                    .is_some_and(|w| w.handle == handle)
+            {
+                self.state.focus_window(&handle);
             }
             changed |= rules_applied;
         }
