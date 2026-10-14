@@ -1045,4 +1045,52 @@ mod tests {
             "Regex: \"{regex_str}\" should return an error"
         );
     }
+
+    /// Two unclassed windows on one screen, window 2 focused. Then window 1 reports
+    /// `WM_CLASS` "late", which matches the rule under test.
+    fn late_class_manager(rule: &str) -> Manager<TestHandle, Config, TestDisplayServer> {
+        let config = parse_ron_config(&format!("(window_rules: [{rule}])"));
+        let mut manager: Manager<TestHandle, Config, TestDisplayServer> = Manager::new(config);
+        manager.screen_create_handler(leftwm_core::models::Screen::default());
+        for handle in [1, 2] {
+            let window = Window::new(WindowHandle(TestHandle(handle)), None, None);
+            manager.window_created_handler(window, -1, -1);
+        }
+        manager.state.focus_window(&WindowHandle(TestHandle(2)));
+        manager.state.actions.clear();
+
+        let mut change = leftwm_core::models::WindowChange::new(WindowHandle(TestHandle(1)));
+        change.res_name = Some("late".to_owned());
+        change.res_class = Some("late".to_owned());
+        assert!(manager.window_changed_handler(change));
+        manager
+    }
+
+    #[test]
+    fn late_class_rule_with_state_change_refocuses_the_window() {
+        let manager = late_class_manager(
+            "(window_class: \"^late$\", spawn_sticky: false, disable_mouse_grab: true)",
+        );
+
+        let focused = manager.state.focus_manager.window(&manager.state.windows);
+        assert_eq!(focused.map(|w| w.handle), Some(WindowHandle(TestHandle(1))));
+    }
+
+    #[test]
+    fn late_class_rule_on_workspace_keeps_the_window_in_the_stacking_order() {
+        let manager = late_class_manager("(window_class: \"^late$\", spawn_on_workspace: 1)");
+
+        let last_order = manager
+            .state
+            .actions
+            .iter()
+            .rev()
+            .find_map(|action| match action {
+                DisplayAction::SetWindowOrder(order) => Some(order.clone()),
+                _ => None,
+            })
+            .expect("a matched rule must reorder windows");
+        assert!(last_order.contains(&WindowHandle(TestHandle(1))));
+        assert!(last_order.contains(&WindowHandle(TestHandle(2))));
+    }
 }
