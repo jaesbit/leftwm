@@ -211,14 +211,25 @@ impl<H: Handle, C: Config, SERVER: DisplayServer<H>> Manager<H, C, SERVER> {
                 // infinite loop. Just be patient a rerender will occur.
             }
         }
+        let mut rules_applied = false;
         if class_changed && let Some(idx) = window_idx {
             // `WM_CLASS` may be set after the window was mapped (Electron, Steam, ...).
-            // Re-apply the window rules so class-based hooks are not missed.
-            let mut window = self.state.windows.remove(idx);
-            changed |= self
+            // Re-apply the window rules so class-based hooks are not missed. The rules run on a
+            // copy so the window stays in `state.windows`: hooks that focus or reorder windows
+            // must still find it. `apply` may reorder the vec, so write back by handle.
+            let mut window = self.state.windows[idx].clone();
+            rules_applied = self
                 .config
                 .setup_predefined_window(&mut self.state, &mut window);
-            self.state.windows.insert(idx, window);
+            if let Some(slot) = self
+                .state
+                .windows
+                .iter_mut()
+                .find(|w| w.handle == window.handle)
+            {
+                *slot = window;
+            }
+            changed |= rules_applied;
         }
         if fullscreen_changed {
             // Update `dock` windows once, so they can recieve mouse click events again.
@@ -233,7 +244,7 @@ impl<H: Handle, C: Config, SERVER: DisplayServer<H>> Manager<H, C, SERVER> {
             }
         }
 
-        if fullscreen_changed || above_changed || transient_changed {
+        if fullscreen_changed || above_changed || transient_changed || rules_applied {
             // Reorder windows.
             self.state.sort_windows();
         }
